@@ -82,10 +82,14 @@ def articles_details():
         content = article_soup.find('div', class_='news__content')
         content_sections = content.find_all('p')
         for section in content_sections:
-            content_list.append(section.text.strip())
+            # Wywalamy tekst z odnośników
+            if section.find('a', href=True):
+                continue
+            text = section.get_text(strip=True)
+            if text:
+                content_list.append(section.text)
         
-        content_text = "\n".join(content_list)
-
+        content_text = "\n\n".join(content_list)
 
         # Pobierz datę
         date = article_soup.find('span', class_='news__date')
@@ -95,7 +99,7 @@ def articles_details():
         print(f"Kategoria: {category_text}")
         print(f"Data: {date_text}")
         print(f"Link: {article_url}")
-        print(f"Treść: {content_text}")
+        print(f"Treść: \n {content_text}")
         print("-" * 40)
 
 articles_details()
