@@ -1,105 +1,109 @@
 import requests
 from bs4 import BeautifulSoup
-import datetime
+from datetime import datetime
+import json
+import time
 
-def get_list_of_articles():
-    # Bez headerów 403
-    headers = {
+BASE_URL = 'https://tuwroclaw.com'
+HEADERS = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
     }
-    url = 'https://tuwroclaw.com/wiadomosci/'
+OUTPUT_FILE = 'articles.json'
+REQUEST_DELAY = 0.5
 
-    # Pobranie zawartości strony z aktualnościami
-    response = requests.get(url, headers=headers)
-    soup = BeautifulSoup(response.text, 'html.parser')
+# Pobieranie strony i zwracanie obiektu BeautifulSoup
+def fetch(path):
+    try:
+        resp = requests.get(BASE_URL + path, headers=HEADERS, timeout=10)
+        resp.raise_for_status()
+        return BeautifulSoup(resp.text, 'html.parser')
+    except Exception as e:
+        return None
 
-    # Sekcja z wiadomościami
-    news_section = soup.find('div', class_='list')
-    if not news_section:
-        news_section = soup  # Na wszelki wypadek xD
+# Pobieranie listy artykułów z sekcji wiadomości
+def get_article_list():
+    soup = fetch('/wiadomosci/')
+    if not soup:
+        return []
+    
+    cards = soup.select('div.news-card')
+    out = []
+    for c in cards:
+        # Link do artykułu
+        a = c.find('a')
+        href = a['href'] if a and 'href' in a.attrs else None    
+        if not href:
+            continue
+        # Data publikacji
+        date_el = c.select_one('.news-card__date')
+        raw_date = (date_el.text.strip() if date_el else '')
+        date_iso = datetime.strptime(raw_date, '%Y/%m/%d').strftime('%Y-%m-%d')
 
-    # Znajdź wszystkie newsy
-    news_items = news_section.find_all('div', class_='news-card')
-    return news_items
+        out.append({
+            'url': href,
+            'date': date_iso
+        })
+    return out
 
-def articles_list():
-    news_list = get_list_of_articles()
-    articles_list = [] # dodać potem dane do struktury czy coś
-    for item in news_list:
-        
-        # Pobierz link
-        link = item.find('a')
-        article_url = 'https://tuwroclaw.com' + link['href'] if link else '#'
-        
-        # Pobierz tytuł
-        title = item.find('h3', class_='news-card__title')
-        title_text = title.text.strip() if title else 'Brak tytułu'
+def get_article_details(path):
+    soup = fetch(path)
+    if not soup:
+        return {}
+    
+    ## Tytuł artykułu
+    title_el = soup.select_one('h1.news__title')
+    title = title_el.text.strip() if title_el else ''
 
-        # Pobierz kategorię
-        category = item.find('span', class_='label label--cat')
-        category_text = category.text.strip() if category else 'Brak kategorii'
-        
-        # Pobierz datę
-        date = item.find('div', class_='news-card__date')
-        date_text = date['datetime'] if date and 'datetime' in date.attrs else date.text.strip() if date else datetime.date.today().strftime('%Y-%m-%d')        
+    ## Data publikacji
+    date_el = soup.select_one('span.news__date')
+    date = date_el.text.strip() if date_el else ''
 
-        print(f"Tytuł: {title_text}")
-        print(f"Kategoria: {category_text}")
-        print(f"Data: {date_text}")
-        print(f"Link: {article_url}")
-        print("-" * 40)
+    ## Lead artykułu
+    lead_el = soup.select_one('p.news__lead')
+    lead = lead_el.text.strip() if lead_el else ''
 
-def articles_details():
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
+    ## Treść artykułu
+    content_nodes = soup.select('div.news__content p, div.news__content ul li')
+    paragraphs = []
+    for p in content_nodes:
+        text = p.get_text(strip=True)
+        if text:
+            paragraphs.append(text)
+    ## Czasami lead jest w div content a czasem poza nim 
+    ## więc go usuwamy jeśli jest w pierwszym paragrafie
+    if lead == paragraphs[0]:
+        paragraphs.pop(0)
+    content = "\n\n".join(paragraphs)
+
+    return {
+        'title': title,
+        'date': date,
+        'lead': lead,
+        'content': content,
     }
-    news_list = get_list_of_articles()
-    for item in news_list:
-        
-        # Pobierz link
-        link = item.find('a')
-        article_url = 'https://tuwroclaw.com' + link['href'] if link else '#'
 
-        article_response = requests.get(article_url, headers=headers)
-        article_soup = BeautifulSoup(article_response.text, 'html.parser')
-        
-        # Pobierz tytuł
-        title = article_soup.find('h1', class_='news__title')
-        title_text = title.text.strip() if title else 'Brak tytułu'
+def main():
+    today_iso = '2025-06-29' #datetime.today().date().isoformat()
+    articles_index = get_article_list()
+    results = []
 
-        # Pobierz kategorię
-        category = item.find('span', class_='label label--cat')
-        category_text = category.text.strip() if category else 'Brak kategorii'
-        
-        content_list= []
+    # Chcemy tylko dzisiejsze artykuły
+    todays_articles = [art for art in articles_index if art['date'] == today_iso]
 
-        # Pobierz lead
-        lead = article_soup.find('p', class_='news__lead')
-        lead_text = lead.text.strip() if lead else ""
-        content_list.append(lead_text)
-        
-        # Pobierz resztę artykułu
-        content = article_soup.find('div', class_='news__content')
-        content_sections = content.find_all('p')
-        for section in content_sections:
-            # Wywalamy tekst z odnośników
-            if section.find('a', href=True):
-                continue
-            text = section.get_text(strip=True)
-            if text:
-                content_list.append(section.text)
-        
-        content_text = "\n\n".join(content_list)
+    for art in todays_articles:
+        details = get_article_details(art['url'])
+        if details:
+            entry = {
+                'url': BASE_URL + art['url'],
+                **details
+            }
+            results.append(entry)
+        time.sleep(REQUEST_DELAY)
 
-        # Pobierz datę
-        date = article_soup.find('span', class_='news__date')
-        date_text = date.text.strip()       
+    # Zapis do JSON
+    with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
+        json.dump(results, f, ensure_ascii=False, indent=2)
+    print(f"Zapisano {len(results)} artykułów (z datą {today_iso}) do pliku {OUTPUT_FILE}")
 
-        print(f"Tytuł: {title_text}")
-        print(f"Kategoria: {category_text}")
-        print(f"Data: {date_text}")
-        print(f"Link: {article_url}")
-        print(f"Treść: \n {content_text}")
-        print("-" * 40)
-
-articles_details()
+if __name__ == '__main__':
+    main()
