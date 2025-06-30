@@ -83,7 +83,7 @@ def get_article_details(path):
     }
 
 def main():
-    today_iso = '2025-06-29' #datetime.today().date().isoformat()
+    today_iso = datetime.today().date().isoformat()
     articles_index = get_article_list()
     results = []
 
